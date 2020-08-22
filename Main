@@ -1,0 +1,183 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import yfinance as yf
+from scipy.optimize import minimize
+import statsmodels.api as sm
+import scipy.stats as scs
+import pypfot
+
+# Seteo de parametros
+N_PORTFOLIOS = 10000  # 'n'portafolios simulados
+N_DAYS = 252   # Business days
+tickers = ['AAPL', 'AMZN', 'GE', 'JNJ']
+START_DATE = '2010-07-01'
+END_DATE = '2020-08-22'
+n_assets = len(tickers)
+
+# Descargamos la data
+data = yf.download(tickers, start=START_DATE, end=END_DATE, progress=True)
+data = data.dropna()
+data = data.loc[:, ['Close']]  # Filtro de datos, utilizo unicamento el precio de cierre
+data = data.xs('Close', axis=1)  # Borro el doble titulo de cada columna
+data.head()
+
+data.to_excel(r'C:\Users\XXXX\.....\data.xlsx', index=True)
+
+# Grafico de series temporales normalizados a 100
+(data / data.iloc[0] * 100).plot(figsize=(8, 6), grid=True, title='Precios de los activos considerados')
+
+# calculo retornos logaritmicos
+ret_l = np.log(data / data.shift(1)).dropna()
+ret_l.head()
+# Grafico log ret
+ret_l.plot(title='Retorno diario de los activos')
+ret_l.hist(bins=50, figsize=(9, 6))
+
+# Retorno de cada activo anual
+ret_prom = ret_l.mean()
+ret_act1 = ret_prom[0] * N_DAYS
+ret_act2 = ret_prom[1] * N_DAYS
+ret_act3 = ret_prom[2] * N_DAYS
+ret_act4 = ret_prom[3] * N_DAYS
+
+# Matriz de varianzas y covarianzas
+mat_cov = ret_l.cov()
+desvios = ret_l.std()  # Calculo de la cov
+desvio_act1 = desvios[0] * np.sqrt(N_DAYS)
+desvio_act2 = desvios[1] * np.sqrt(N_DAYS)
+desvio_act3 = desvios[2] * np.sqrt(N_DAYS)
+desvio_act4 = desvios[3] * np.sqrt(N_DAYS)
+
+# Primer intento al azar para construir un portfolio y encontrar su Sharpe Ratio
+np.random.seed()
+# Columna de Acciones
+print('Acciones')
+print(data.columns)
+print('\n')
+# Genero numeros random usando la distribución uniforme (0 a 1)
+print('Numeros Aleatorios')
+weights = np.array(np.random.random(n_assets))
+print(weights)
+print('\n')
+# Transformo los numeros aleatorios a % (Cada numero / La suma de los n numeros)
+print('Rebalanceo para que de 1')
+weights = weights / np.sum(weights)
+print(weights)
+print('\n')
+# Retorno esperado anual del portafolio
+print('Retorno esperado del Portfolio')
+exp_ret = np.sum(ret_prom * weights) * N_DAYS  # Suma producto de los retornos prom por lo ponderadores
+print(exp_ret)
+print('\n')
+# Volatilidad esperada anual
+print('Volatilidad Esperada')
+exp_vol = np.sqrt(np.dot(weights.T, np.dot(mat_cov * N_DAYS, weights)))  # dot labura con matrices
+print(exp_vol)
+print('\n')
+# Sharpe Ratio
+SR = exp_ret / exp_vol
+print('Sharpe Ratio')
+print(SR)
+
+# Comenzamos las simulaciones de portafolios inicializando las matrices
+all_weights = np.zeros((N_PORTFOLIOS, len(data.columns)))   # Vector de ceros filas, columnas
+ret_arr = np.zeros(N_PORTFOLIOS)
+vol_arr = np.zeros(N_PORTFOLIOS)
+sharpe_arr = np.zeros(N_PORTFOLIOS)
+# seq = list(range(0,N_PORTFOLIOS)) #lista que arranca en 0 y termina en cant de port
+
+# Por cada portafolio de las N simulaciones, calculamos las ponderaciones,
+# el retorno, la volatilidad y el SR.
+for i in range(N_PORTFOLIOS):
+    weights = np.array(np.random.random(n_assets))
+    weights = weights / np.sum(weights)
+    all_weights[i, :] = weights
+    ret_arr[i] = np.sum((ret_prom * weights) * N_DAYS)
+    vol_arr[i] = np.sqrt(np.dot(weights.T, np.dot(mat_cov * N_DAYS, weights)))
+
+for i in range(N_PORTFOLIOS):
+    sharpe_arr[i] = ret_arr[i] / vol_arr[i]
+
+# Analisis de resultados
+
+print("El Sharpe Ratio Max es: " + str(sharpe_arr.max()))
+print("en el Portfolio número: " + str(sharpe_arr.argmax()))
+print("La Menor Volatilidad es: " + str(vol_arr.min()))
+print("en el Portfolio número: " + str(vol_arr.argmax()))
+print()
+print('Proporciones:\n')
+print("APPLE: " + str(round(all_weights[sharpe_arr.argmax(), :][0] * 100, 2)) + "%")
+print("AMAZON: " + str(round(all_weights[sharpe_arr.argmax(), :][1] * 100, 2)) + "%")
+print("GENERAL ELECTRIC: " + str(round(all_weights[sharpe_arr.argmax(), :][2] * 100, 2)) + "%")
+print("JOHNSON & JOHNSON: " + str(round(all_weights[sharpe_arr.argmax(), :][3] * 100, 2)) + "%\n")
+
+# Graficamente
+
+max_sr_ret = ret_arr[sharpe_arr.argmax()]
+max_sr_vol = vol_arr[sharpe_arr.argmax()]
+min_vol = vol_arr[vol_arr.argmin()]
+ret_min_vol = ret_arr[vol_arr.argmin()]
+
+plt.figure(figsize=(20, 10))
+plt.scatter(vol_arr, ret_arr, c=sharpe_arr, cmap='RdYlGn')
+plt.colorbar(label='Sharpe Ratio')
+plt.xlabel('Volatilidad', fontsize=25, color='black')
+plt.ylabel('Retorno', fontsize=25, color='black')
+plt.title('Portafolios simulados: ', fontsize=25, color='black')
+plt.scatter(max_sr_vol, max_sr_ret, c='red', marker='*', s=250, label='Max Sharpe Ratio')
+plt.scatter(min_vol, ret_min_vol, c='black', marker='X', s=250, label='Min Vol')
+plt.scatter(desvio_act1, ret_act1, c='black', marker='v', s=200, label='AAPL')
+plt.scatter(desvio_act2, ret_act2, c='black', marker='>', s=200, label='AMZN')
+plt.scatter(desvio_act3, ret_act3, c='black', marker='d', s=200, label='GE')
+plt.scatter(desvio_act4, ret_act4, c='black', marker='h', s=200, label='JNJ')
+plt.tick_params(axis='both', colors='blue', labelsize=20)
+plt.legend(loc='center right', fontsize=17)
+plt.show()
+
+
+# Resolución matemática
+
+# Función que reciba las proporciones del portafolio y devuelva el retorno,
+# la volatilidad y el SR
+def get_ret_vol_sr(weights):
+    weights = np.array(weights)
+    ret = np.sum(ret_l.mean() * weights) * N_DAYS
+    vol = np.sqrt(np.dot(weights.T, np.dot(ret_l.cov() * N_DAYS, weights)))
+    sr = ret / vol
+    return np.array([ret, vol, sr])
+
+
+# Función a minimizar, Sharpe Ratio Negativo
+def neg_sharpe(weights):
+    return get_ret_vol_sr(weights)[2] * -1
+
+
+# Restricción para minimizar
+def check_sum(weights):
+    return np.sum(weights) - 1
+
+
+cons = ({'type': 'eq', 'fun': check_sum})
+
+# Las proporciones deben estar entre 0 y 1, no permito ir short.
+bounds = ((0, 1), (0, 1), (0, 1), (0, 1))
+
+# Optimizamos el portafolio
+init_guess = [0.25, 0.25, 0.25, 0.25]
+opt_results = minimize(neg_sharpe, init_guess, method='SLSQP', bounds=bounds, constraints=cons)
+
+# Resultados
+print('Portafolio Optimo (Periodo Mayo 2010 - Julio 2020):\n')
+print('Proporciones:\n')
+print("APPLE: " + str(round(opt_results.x[0] * 100, 2)) + "%")
+print("AMAZON: " + str(round(opt_results.x[1] * 100, 2)) + "%")
+print("GENERAL ELECTRIC: " + str(round(opt_results.x[2] * 100, 2)) + "%")
+print("JOHNSON & JOHNSON: " + str(round(opt_results.x[3] * 100, 2)) + "%\n")
+print('Metricas:\n')
+print("RETORNO MEDIO: " + str(round(get_ret_vol_sr(opt_results.x)[0] * 100, 2)) + "%")
+print("VOLATILIDAD: " + str(round(get_ret_vol_sr(opt_results.x)[1] * 100, 2)) + "%")
+print("SHARPE: " + str(get_ret_vol_sr(opt_results.x)[2]))
+
+
+
